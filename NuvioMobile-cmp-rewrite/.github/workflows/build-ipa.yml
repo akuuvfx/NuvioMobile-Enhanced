@@ -1,0 +1,113 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Release (optimized) or Debug (faster)
+        required: true
+        type: choice
+        options:
+          - Release
+          - Debug
+        default: Release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned ${{ inputs.configuration }} IPA
+    # GitHub-hosted arm64 runner that ships Xcode 27 (the app needs the iOS 27.1 SDK).
+    runs-on: xcode-27
+    timeout-minutes: 90
+    env:
+      GRADLE_OPTS: -Dfile.encoding=UTF-8
+      IOS_CONFIGURATION: ${{ inputs.configuration }}
+      KOTLIN_DAEMON_JVMARGS: -Xmx2048M
+      NUVIO_GRADLE_JVMARGS: -Xmx4608M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768M
+      NUVIO_KOTLIN_NATIVE_JVMARGS: -Xmx4608M
+      # Optional: base64 of a local.properties with your own API keys (TMDB, Supabase, Trakt...).
+      RELEASE_PROPERTIES_BASE64: ${{ secrets.NUVIO_LOCAL_PROPERTIES_BASE64 }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Select Xcode 27.1
+        run: |
+          if [[ -d /Applications/Xcode_27.1.app ]]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_27.1.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache Kotlin Native
+        uses: actions/cache@v5
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Verify Apple toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Fix executable bits (lost when pushing from Windows)
+        run: chmod +x gradlew scripts/*.sh
+
+      - name: Fetch MPVKit (not a registered submodule in this fork)
+        run: |
+          if [[ ! -f MPVKit/Package.swift ]]; then
+            rm -rf MPVKit
+            git clone --depth 1 --branch Nuvio https://github.com/NuvioMedia/MPVKit.git MPVKit
+          fi
+
+      - name: Configure runtime properties
+        if: env.RELEASE_PROPERTIES_BASE64 != ''
+        run: |
+          printf '%s' "${RELEASE_PROPERTIES_BASE64}" | base64 --decode > local.properties
+          sed -i '' -E '/^[[:space:]]*(sdk\.dir|NUVIO_RELEASE_STORE_FILE)[[:space:]]*=/d' local.properties
+
+      - name: Prepare iOS dependencies
+        run: ./scripts/prepare-ios-dependencies.sh
+
+      - name: Build unsigned IPA
+        run: ./scripts/build-ios-ipa.sh
+
+      - name: Summarize IPA
+        run: |
+          ipa_path="$(find build/ios-ipa -maxdepth 1 -type f -name '*.ipa' -print -quit)"
+          if [[ -z "${ipa_path}" ]]; then
+            echo "No IPA was produced." >&2
+            exit 1
+          fi
+          {
+            echo "## IPA"
+            echo
+            echo "- File: $(basename "${ipa_path}")"
+            echo "- Size: $(du -h "${ipa_path}" | cut -f1)"
+            echo "- Configuration: ${IOS_CONFIGURATION}"
+            echo "- Signing: unsigned (sign it with AltStore / SideStore / Sideloadly)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuvio-ipa
+          path: build/ios-ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 14

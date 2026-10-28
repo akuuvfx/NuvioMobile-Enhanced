@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_playback_pip">Picture in Picture</string>
+    <string name="settings_playback_pip_description">Continue la lecture dans une fenêtre flottante quand vous quittez l\'application.</string>
+
+    <string name="theme_crunchyroll">Crunchyroll</string>
+    <string name="theme_netflix">Netflix</string>
+
+    <string name="settings_appearance_section_streaming_style">Style streaming</string>
+    <string name="settings_appearance_style_netflix">Style Netflix</string>
+    <string name="settings_appearance_style_netflix_description">Thème noir et rouge, affiches compactes aux coins nets.</string>
+    <string name="settings_appearance_style_crunchyroll">Style Crunchyroll</string>
+    <string name="settings_appearance_style_crunchyroll_description">Thème orange, grandes cartes paysage aux coins arrondis.</string>
+
+    <string name="action_watch_again">Revoir</string>
+</resources>
